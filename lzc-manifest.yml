@@ -1,0 +1,235 @@
+# Loomio（cloud.lazycat.app.loomio）运行配置
+# 上游：https://github.com/loomio/loomio  v3.10.0
+# 镜像：loomio/loomio:3.10.0 → registry.lazycat.cloud/wans/loomio/loomio:a39ced6dcf8386dd（amd64）
+# subdomain 一经发布不可更改：它决定实例标识与数据存储路径。
+application:
+  subdomain: loomio
+  upstreams:
+    - location: /
+      # Loomio 主服务：puma 监听 3000（镜像 CMD → docker_start.sh → thrust puma）
+      backend: http://loomio.cloud.lazycat.app.loomio.lzcapp:3000
+      disable_trim_location: true
+    # 协作编辑（Hocuspocus WebSocket）：客户端连 wss://<域名>/hocuspocus
+    - location: /hocuspocus
+      backend: http://loomio-hocuspocus.cloud.lazycat.app.loomio.lzcapp:80
+    - location: /hocuspocus/
+      backend: http://loomio-hocuspocus.cloud.lazycat.app.loomio.lzcapp:80
+      disable_trim_location: true
+  health_check:
+    # /up 是 Loomio 内置的健康端点（返回 200 不重定向）。
+    # 不能用 /：带 ASSUME_SSL 时 / 会 302 到 https://，平台健康检查跟随会失败。
+    test_url: http://loomio.cloud.lazycat.app.loomio.lzcapp:3000/up
+    start_period: 600s
+    timeout: 15s
+  injects:
+    # ── 网盘文件拦截（官方《自动拦截文件选择器》专题 · request 同源桥接）────
+    - id: lazycat-file-bridge
+      'on': request
+      auth_required: false
+      when:
+        - /__lazycat_file_bridge/*
+      do:
+        - src: |
+            const bridgePrefix = "/__lazycat_file_bridge";
+            const requestHost = String(ctx.request.host || "").split(":")[0].toLowerCase();
+            const firstDot = requestHost.indexOf(".");
+            const method = String(ctx.request.method || "").toUpperCase();
+            if (firstDot <= 0 || !requestHost.endsWith(".heiyu.space") ||
+                !["GET", "HEAD", "PUT"].includes(method)) {
+              ctx.response.send(["GET", "HEAD", "PUT"].includes(method) ? 400 : 405,
+                "Invalid LazyCat file bridge request");
+              return;
+            }
+            const boxDomain = requestHost.slice(firstDot + 1);
+            ctx.headers.del("Origin");
+            ctx.headers.del("Referer");
+            ctx.proxy.to("https://file." + boxDomain, {
+              path: "/files/home" + ctx.request.path.slice(bridgePrefix.length),
+              query: ctx.request.raw_query,
+              use_target_host: true,
+              timeout_ms: 120000,
+              on_fail: "error",
+            });
+    # ── 免密登录（官方《免密登录》专题 · 自定义 browser inject）────────────
+    # 首次打开自动以管理员身份登录；退出登录后停用自动登录并显示「一键登录」按钮。
+    - id: loomio-autologin
+      'on': browser
+      auth_required: false
+      when:
+        - /*
+      do:
+        - src: file:///lzcapp/pkg/content/lazycat-injects/loomio-autologin.js
+    # ── 文件选择器（上传/下载走懒猫网盘）────────────────────────────────────
+    # auth_required: true —— 客户端（有平台票据）里接管文件选择与下载；
+    # 普通浏览器里平台跳过该注入，应用原生上传/下载可正常工作
+    # （auth_required: false 会在无票据上下文装上失效钩子，挡住原生路径）。
+    - id: open-save-chooser
+      'on': browser
+      auth_required: true
+      when:
+        - /*
+      do:
+        - src: >-
+            file:///lzcapp/pkg/content/lazycat-injects/lzc-file-chooser-inject.js
+          params:
+            diskRoot: /_lzc/files/home
+            fileBridgeRoot: /__lazycat_file_bridge
+            fallbackMime: application/octet-stream
+            locale: auto
+            hooks:
+              fileSystemAccess: true
+              fileInput: true
+              downloadAnchor: true
+
+services:
+  # Loomio 主服务（Ruby on Rails，Puma + Solid Queue 由镜像内 supervisor 脚本启动）
+  loomio:
+    image: registry.lazycat.cloud/wans/loomio/loomio:a39ced6dcf8386dd
+    environment:
+      - TZ=Asia/Shanghai
+      - CANONICAL_HOST={{ .S.AppDomain }}
+      - PUBLIC_APP_URL=https://{{ .S.AppDomain }}
+      - SITE_NAME=Loomio
+      - SUPPORT_EMAIL=admin@loomio.local
+      # 平台 ingress 终结 TLS：
+      # - FORCE_SSL 让生成的资源/图片 URL 使用 https（否则混合内容被浏览器拦截）；
+      # - ASSUME_SSL 让 Rails 相信请求已是 https，不做重定向（/up 也在 Loomio 的豁免表内）；
+      # - 平台健康检查用 /up（200 且不重定向）。
+      - FORCE_SSL=1
+      - ASSUME_SSL=1
+      # 随包固化的内部密钥（非本机凭据）；SECRET_KEY_BASE 用于会话签名等
+      - SECRET_KEY_BASE=f17998239c4c1e8a6fd28c802aaed3660c8e9cc81265bd740ca538ff7264d0a7
+      - DATABASE_URL=postgresql://postgres:ee92231a0b6586f7e33984419e911a8a@loomio-db:5432/loomio_production
+      - REDIS_CACHE_URL=redis://loomio-redis:6379/0
+      - ACTIVE_STORAGE_SERVICE=local
+      # 协作编辑 WebSocket 地址（浏览器端使用；服务在 loomio-hocuspocus）
+      - HOCUSPOCUS_URL=wss://{{ .S.AppDomain }}/hocuspocus
+      # 管理员凭据：setup_script 幂等建号，注入脚本自动登录（简介已披露）
+      - LOOMIO_ADMIN_EMAIL=admin@loomio.local
+      - LOOMIO_ADMIN_NAME=管理员
+      - LOOMIO_ADMIN_PASSWORD=PNBo6Tl9O4K5f4kt
+    # 首次启动：等数据库就绪 → db:prepare（建库建表，幂等）→ 建管理员 → 落标记；
+    # 之后每次启动只做一次标记检查。（loomio 镜像非 s6，setup_script 不会挤掉 /init）
+    setup_script: |
+      #!/bin/bash
+      set -e
+      cd /loomio
+      export HOME=/loomio
+      mkdir -p /lzcapp/var/loomio/system /lzcapp/var/loomio/storage /lzcapp/var/loomio/files /lzcapp/var/loomio/tmp /lzcapp/var/loomio/client3
+      if [ ! -f /lzcapp/var/loomio/.admin-ready ]; then
+        for i in $(seq 1 90); do
+          if (echo > /dev/tcp/loomio-db/5432) 2>/dev/null; then break; fi
+          sleep 2
+        done
+        bundle exec rake db:prepare
+        cat > /tmp/loomio_admin.rb <<'RUBY'
+        email = ENV["LOOMIO_ADMIN_EMAIL"]
+        u = User.find_by(email: email)
+        u ||= User.new(name: ENV["LOOMIO_ADMIN_NAME"], email: email, username: "admin")
+        u.password = ENV["LOOMIO_ADMIN_PASSWORD"]
+        u.password_confirmation = ENV["LOOMIO_ADMIN_PASSWORD"]
+        u.email_verified = true
+        u.is_admin = true
+        u.selected_locale = "zh_CN"
+        u.save!
+        puts "loomio admin ensured: #{email}"
+      RUBY
+        bundle exec rails runner /tmp/loomio_admin.rb
+        touch /lzcapp/var/loomio/.admin-ready
+      fi
+    binds:
+      # 用户上传的头像与附件（旧式 uploads 目录）
+      - /lzcapp/var/loomio/system:/loomio/public/system
+      # ActiveStorage 本地磁盘（附件原文件）
+      - /lzcapp/var/loomio/storage:/loomio/storage
+      # 群组文件
+      - /lzcapp/var/loomio/files:/loomio/public/files
+      # Rails 临时目录
+      - /lzcapp/var/loomio/tmp:/loomio/tmp
+      # 前端静态资源累积目录（每次启动从镜像同步）
+      - /lzcapp/var/loomio/client3:/loomio/public/client3
+    depends_on:
+      - loomio-db
+      - loomio-redis
+    healthcheck:
+      test: [CMD-SHELL, "curl --fail --silent --max-time 10 -o /dev/null http://localhost:3000/ || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 20
+      start_period: 600s
+
+  # 后台任务（Solid Queue worker：邮件队列、通知、周期任务）
+  loomio-worker:
+    image: registry.lazycat.cloud/wans/loomio/loomio:a39ced6dcf8386dd
+    environment:
+      - TZ=Asia/Shanghai
+      - TASK=worker
+      - CANONICAL_HOST={{ .S.AppDomain }}
+      - SECRET_KEY_BASE=f17998239c4c1e8a6fd28c802aaed3660c8e9cc81265bd740ca538ff7264d0a7
+      - DATABASE_URL=postgresql://postgres:ee92231a0b6586f7e33984419e911a8a@loomio-db:5432/loomio_production
+      - REDIS_CACHE_URL=redis://loomio-redis:6379/0
+      - ACTIVE_STORAGE_SERVICE=local
+    binds:
+      - /lzcapp/var/loomio/system:/loomio/public/system
+      - /lzcapp/var/loomio/storage:/loomio/storage
+      - /lzcapp/var/loomio/files:/loomio/public/files
+      - /lzcapp/var/loomio/tmp:/loomio/tmp
+    depends_on:
+      - loomio
+      - loomio-db
+      - loomio-redis
+    healthcheck:
+      test: [CMD-SHELL, "grep -qaE 'bin/jobs|solid_queue' /proc/[0-9]*/cmdline 2>/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 300s
+
+  # 协作编辑服务（Hocuspocus WebSocket，编辑器实时同步；文档仍存在主库）
+  loomio-hocuspocus:
+    image: registry.lazycat.cloud/wans/loomio/loomio:a39ced6dcf8386dd
+    environment:
+      - TZ=Asia/Shanghai
+      - TASK=hocuspocus
+      # 授权回调指向主服务内部域名（服务间直连，不经公网路径）
+      - PRIVATE_APP_URL=http://loomio.cloud.lazycat.app.loomio.lzcapp
+    depends_on:
+      - loomio
+    healthcheck:
+      test: [CMD-SHELL, "bash -c ': </dev/tcp/127.0.0.1/80' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+
+  # PostgreSQL（Loomio 生产数据库）
+  loomio-db:
+    image: registry.lazycat.cloud/wans/library/postgres:af6b77f9524d90a3
+    environment:
+      - TZ=Asia/Shanghai
+      - POSTGRES_DB=loomio_production
+      - POSTGRES_PASSWORD=ee92231a0b6586f7e33984419e911a8a
+      - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C
+    binds:
+      # 必须与镜像声明的 VOLUME 路径完全一致，避免匿名卷盖住持久数据
+      - /lzcapp/var/loomio/pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d loomio_production"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
+
+  # Redis（缓存与 ActionCable；可重建，放在 cache 目录）
+  loomio-redis:
+    image: registry.lazycat.cloud/wans/library/redis:6eb486b71d86826c
+    environment:
+      - TZ=Asia/Shanghai
+    binds:
+      - /lzcapp/cache/loomio-redis:/data
+    healthcheck:
+      test: [CMD, "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s

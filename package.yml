@@ -1,0 +1,68 @@
+package: cloud.lazycat.app.loomio
+version: 3.10.0-3
+name: Loomio 小组决策
+description: 小组讨论与在线决策工具：发起讨论、提出方案、投票表决，适合团队、社区与家庭协作
+author: Loomio Cooperative
+license: AGPL-3.0
+homepage: https://www.loomio.com
+min_os_version: 1.6.0
+
+permissions:
+  required:
+    - net.internet
+
+locales:
+  zh-CN:
+    name: Loomio 小组决策
+    description: 小组讨论与在线决策工具：发起讨论、提出方案、投票表决，适合团队、社区与家庭协作。
+    usage: |
+      Loomio 是运行在你微服上的小组讨论与决策工具：用一个「群组」把一群人和他们要做的决定聚在一起，发起讨论、收集意见、提出方案（提案）、投票表决，并把结论沉淀下来。适合团队、兴趣小组、社区、楼栋、家庭等小群体。
+
+      首次打开会自动以管理员身份登录（免密，无需注册或输入密码）。进入后点击「新建群组」创建第一个小组，在后台添加成员，就可以开始讨论。
+
+      主要功能：
+      - 群组与讨论：围绕话题开「讨论串」，成员跟帖回复、上传附件；
+      - 方案与投票：提出「提案」并设定截止时间，成员投支持、反对或弃权，也可提出异议；
+      - 任务：把讨论中的事项指派给成员并跟踪完成；
+      - 站内通知、关注与未读汇总；
+      - 站内全文搜索；
+      - 附件：图片与文件上传、在线预览；
+      - 管理后台：用户与群组管理、账户与权限设置（管理员）。
+
+      审核账号（应用内登录使用）：
+      - 邮箱：admin@loomio.local
+      - 密码：PNBo6Tl9O4K5f4kt
+      - 说明：全新安装首次打开会自动登录，通常无需手动输入；退出登录后，登录页右下角会出现「一键登录（管理员）」按钮，点一下即可重新进入，也可直接输入以上账号。
+
+      说明：
+      - 界面跟随浏览器语言，中文浏览器默认显示中文；
+      - 数据（群组、讨论、附件）保存在微服本机数据目录，重启与升级均不丢失；
+      - 未配置邮件服务，邮件通知与邮件邀请不可用（站内通知正常）；添加成员可由管理员在后台完成；
+      - 桌面浏览器与移动端浏览器均可使用。
+  en-US:
+    name: Loomio
+    description: Group discussion and online decision making. Start discussions, make proposals and vote. Great for teams, communities and families.
+    usage: |
+      Loomio is a group discussion and decision-making tool that runs on your box. A group gathers the people and the decisions they make together: start discussions, collect opinions, raise proposals, take votes, and keep the outcomes in one place. It suits teams, interest groups, communities and families.
+
+      On first open you are signed in automatically as the administrator (no registration or password needed). Click "New group" to create your first group, add members from the admin panel, and start discussing.
+
+      Features:
+      - Groups and discussions with comments and file attachments;
+      - Proposals and votes with deadlines: agree, disagree, abstain, or block;
+      - Tasks assigned to members with completion tracking;
+      - In-app notifications, follows and unread summaries;
+      - Full-text search;
+      - Attachments: upload and preview images and files;
+      - Admin panel: user and group management, account and permission settings.
+
+      Review account (for signing in inside the app):
+      - Email: admin@loomio.local
+      - Password: PNBo6Tl9O4K5f4kt
+      - Note: a fresh install signs you in automatically; after signing out, a "One-click sign in (admin)" button appears at the bottom right of the login page.
+
+      Notes:
+      - The interface follows the browser language; Chinese browsers show Chinese by default;
+      - All data (groups, discussions, attachments) is stored on your box and survives restarts and upgrades;
+      - No mail service is configured, so email notifications and email invitations are unavailable. In-app notifications work. The administrator can add members from the admin panel;
+      - Works on desktop and mobile browsers.
